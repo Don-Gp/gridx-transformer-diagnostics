@@ -19,7 +19,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime, timedelta
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*Matplotlib is currently using agg.*",
+)
 
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor

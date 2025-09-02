@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 GridX ETT Predictive Maintenance Training Launcher
-Runs all ETT predictive maintenance models and generates reports
+Loads processed ETT dataset, trains all predictive maintenance models, and
+generates reports.
+
+Usage:
+    python -m scripts.run_ett_training
+
+The script performs the following steps:
+1. Loads the ETT data produced by the unified data pipeline
+2. Trains maintenance, urgency, time-to-failure, anomaly, and LSTM models
+3. Saves trained models and visualization artifacts
+4. Generates a summary report of model performance
 """
 
 import sys
@@ -15,7 +25,7 @@ def main():
     print("GRIDX ETT PREDICTIVE MAINTENANCE MODEL TRAINING")
     print("="*80)
     
-    # Initialize predictor
+    # Initialize predictor (loads ETT dataset)
     predictor = ETTPredictiveMaintenance()
     
     # Train all models
@@ -51,4 +61,5 @@ def main():
     return results
 
 if __name__ == "__main__":
+    
     main()

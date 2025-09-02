@@ -3,11 +3,6 @@
 GridX Comprehensive Testing Launcher
 Runs all tests before model training
 """
-
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
 from backend.app.ml_models.model_tests.ieee_model_tests import run_comprehensive_tests
 
 def main():
@@ -29,8 +24,8 @@ def main():
         print("✅ Production readiness confirmed")
         print("\n➡️  READY TO PROCEED WITH MODEL TRAINING")
         print("\nNext steps:")
-        print("1. python scripts/run_ieee_training.py")
-        print("2. python scripts/run_ett_training.py")
+        print("1. python -m scripts.run_ieee_training")
+        print("2. python -m scripts.run_ett_training")
     else:
         print("\n❌ SOME TESTS FAILED!")
         print("Please review test output and fix issues before proceeding.")

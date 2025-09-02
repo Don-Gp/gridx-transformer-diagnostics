@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 GridX IEEE Fault Detection Training Launcher
-Runs all IEEE fault detection models and generates reports
-"""
+Runs all IEEE fault detection models and generates reports.
+Run this module with:
 
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    python -m scripts.run_ieee_training
+"""
 
 from backend.app.ml_models.ieee_fault_models import IEEEFaultClassifier
 
@@ -45,4 +44,5 @@ def main():
     return best_model, best_accuracy
 
 if __name__ == "__main__":
+   
     main()

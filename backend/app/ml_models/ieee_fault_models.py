@@ -13,29 +13,35 @@ Target: >95% accuracy across 17 fault classes
 import os
 import pickle
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import warnings
-warnings.filterwarnings('ignore')
 
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
-from sklearn.model_selection import GridSearchCV, cross_val_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.model_selection import GridSearchCV
 import xgboost as xgb
 
 # Deep Learning
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Conv1D, Dense, Dropout, BatchNormalization
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Reshape
+from tensorflow.keras.layers import (
+    LSTM,
+    Conv1D,
+    Dense,
+    Dropout,
+    BatchNormalization,
+    MaxPooling1D,
+    Flatten,
+    Reshape,
+)
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.utils import to_categorical
+warnings.filterwarnings('ignore')
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -251,28 +257,35 @@ class IEEEFaultClassifier:
         
         # Prepare data for CNN-LSTM (reshape for time-series)
         # Assuming features represent time-series patterns
-        n_features = self.X_train.shape[1]
-        n_timesteps = min(10, n_features)  # Use first 10 features as timesteps
-        n_features_per_step = n_features // n_timesteps
+        n_timesteps = 10
+        n_features_per_step = int(self.X_train.shape[1] / n_timesteps)
         
         # Reshape data for CNN-LSTM input
-        X_train_reshaped = self.X_train[:, :n_timesteps*n_features_per_step].reshape(
-            -1, n_timesteps, n_features_per_step
+        X_train_reshaped = (
+            self.X_train.iloc[:, : n_timesteps * n_features_per_step]
+            .to_numpy()
+            .reshape(-1, n_timesteps, n_features_per_step)
         )
-        X_val_reshaped = self.X_val[:, :n_timesteps*n_features_per_step].reshape(
-            -1, n_timesteps, n_features_per_step
+        X_val_reshaped = (
+            self.X_val.iloc[:, : n_timesteps * n_features_per_step]
+            .to_numpy()
+            .reshape(-1, n_timesteps, n_features_per_step)
         )
-        X_test_reshaped = self.X_test[:, :n_timesteps*n_features_per_step].reshape(
-            -1, n_timesteps, n_features_per_step
+        X_test_reshaped = (
+            self.X_test.iloc[:, : n_timesteps * n_features_per_step]
+            .to_numpy()
+            .reshape(-1, n_timesteps, n_features_per_step)
         )
         
+         # Verify shapes before training
+        print(X_train_reshaped.shape)
+
         # Convert labels to categorical
         n_classes = len(np.unique(self.y_train))
         y_train_cat = to_categorical(self.y_train, n_classes)
         y_val_cat = to_categorical(self.y_val, n_classes)
         y_test_cat = to_categorical(self.y_test, n_classes)
         
-        print(f"Reshaped input: {X_train_reshaped.shape}")
         print(f"Output classes: {n_classes}")
         
         # Build CNN-LSTM architecture
@@ -480,8 +493,14 @@ class IEEEFaultClassifier:
         
         return ensemble_pred
     
-    def plot_results(self, save_plots=True):
-        """Generate comprehensive results visualizations"""
+    def plot_results(self, save_plots=True, ylim=None):
+        """Generate comprehensive results visualizations
+
+        Args:
+            save_plots (bool): whether to save generated plots to disk.
+            ylim (tuple | None): optional y-axis limits override as (min, max).
+                When None, the limits scale dynamically based on the data.
+        """
         print("\n" + "="*60)
         print("GENERATING RESULTS VISUALIZATIONS")
         print("="*60)
@@ -499,7 +518,12 @@ class IEEEFaultClassifier:
         ax1.bar(models, accuracies, color=['skyblue', 'lightgreen', 'salmon', 'gold'][:len(models)])
         ax1.set_title('Model Accuracy Comparison', fontsize=14, fontweight='bold')
         ax1.set_ylabel('Accuracy')
-        ax1.set_ylim(0.8, 1.0)
+        if ylim is not None:
+            ax1.set_ylim(*ylim)
+        else:
+            y_min = 0.0
+            y_max = max(accuracies) * 1.1
+            ax1.set_ylim(y_min, min(1.0, y_max))
         for i, acc in enumerate(accuracies):
             ax1.text(i, acc + 0.01, f'{acc:.3f}', ha='center', fontweight='bold')
         
@@ -508,7 +532,12 @@ class IEEEFaultClassifier:
         ax2.bar(models, f1_scores, color=['skyblue', 'lightgreen', 'salmon', 'gold'][:len(models)])
         ax2.set_title('Model F1-Score Comparison', fontsize=14, fontweight='bold')
         ax2.set_ylabel('F1-Score')
-        ax2.set_ylim(0.8, 1.0)
+        if ylim is not None:
+            ax2.set_ylim(*ylim)
+        else:
+            y_min = 0.0
+            y_max = max(f1_scores) * 1.1
+            ax2.set_ylim(y_min, min(1.0, y_max))
         for i, f1 in enumerate(f1_scores):
             ax2.text(i, f1 + 0.01, f'{f1:.3f}', ha='center', fontweight='bold')
         
@@ -561,7 +590,8 @@ class IEEEFaultClassifier:
         
         # Save CNN-LSTM model
         if 'cnn_lstm' in self.models:
-            self.models['cnn_lstm'].save(f"{save_path}/cnn_lstm_model.h5")
+            model_path_keras = f"{save_path}/cnn_lstm_model.keras"
+            self.models['cnn_lstm'].save(model_path_keras, save_format="keras")
             print("Saved CNN-LSTM model")
             
             # Save CNN-LSTM metadata
@@ -590,7 +620,8 @@ class IEEEFaultClassifier:
         print("="*80)
         
         print(f"Training Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Dataset: IEEE Fault Detection (17 classes)")
+        num_classes = len(np.unique(self.y_train))
+        print(f"Dataset: IEEE Fault Detection ({num_classes} classes)")
         print(f"Training samples: {self.X_train.shape[0]}")
         print(f"Test samples: {self.X_test.shape[0]}")
         print(f"Features: {self.X_train.shape[1]}")

@@ -73,6 +73,23 @@ npm start
 - API Documentation: http://localhost:8000/api/docs
 - Frontend: http://localhost:3000 (when implemented)
 
+## 🧠 Model Training
+
+Model training for the IEEE and ETT datasets runs as separate processes. After
+generating the unified datasets (via `python -m scripts.run_unified_gridx_pipeline`),
+train each set of models independently:
+
+```bash
+# IEEE DataPort fault detection models
+python -m scripts.run_ieee_training
+
+# ETT predictive maintenance models
+python -m scripts.run_ett_training
+```
+
+Both scripts load their respective datasets, train all models, and store
+artifacts in `backend/app/ml_models/trained/`.
+
 ## 📊 Development Roadmap
 
 ### Phase 1: Foundation (Current)
