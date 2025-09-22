@@ -13,6 +13,7 @@ import json
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import SelectKBest, f_classif
 
 from ..utils.data_processor import GridXDataProcessor, DatasetConfig, FaultCategory, TransformerType
 from ..utils.feature_extractor import GridXFeatureExtractor, FeatureConfig, FeatureSelector
@@ -36,7 +37,7 @@ class PipelineConfig:
         # FIXED: Scale up samples per class based on available data
         if production_mode:
             # Use much larger sample size for production models
-            self.samples_per_class = 2000  # Increased from 500
+            self.samples_per_class = 8000  # Increased from 500
             self.max_files_per_class = None  # No limit - use all available files
         else:
             # Testing mode

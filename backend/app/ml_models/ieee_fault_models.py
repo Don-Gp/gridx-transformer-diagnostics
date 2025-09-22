@@ -17,12 +17,17 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*Matplotlib is currently using agg.*",
+)
 
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.metrics import precision_recall_fscore_support
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, ParameterGrid
 import xgboost as xgb
 
 # Deep Learning
@@ -41,7 +46,7 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.utils import to_categorical
-warnings.filterwarnings('ignore')
+
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -62,6 +67,7 @@ class IEEEFaultClassifier:
         self.data_path = data_path
         self.models = {}
         self.results = {}
+        self.expected_features = 50  # Feature count after SelectKBest
         # Get fault classes dynamically from the data
         if hasattr(self, 'class_mapping'):
             # Create fault classes list from actual class mapping
@@ -97,12 +103,17 @@ class IEEEFaultClassifier:
             preprocessing = ieee_data['preprocessing']
             self.scaler = preprocessing['scaler']
             self.feature_selector = preprocessing.get('feature_selector', None)
+
+            if self.X_train.shape[1] != self.expected_features:
+                raise ValueError(
+                    f"Expected {self.expected_features} features, got {self.X_train.shape[1]}"
+                )
             
             print(f"Data loaded successfully!")
             print(f"Training samples: {self.X_train.shape[0]}")
             print(f"Validation samples: {self.X_val.shape[0]}")
             print(f"Test samples: {self.X_test.shape[0]}")
-            print(f"Features: {self.X_train.shape[1]}")
+            print(f"Features: {self.expected_features}")
             print(f"Classes: {len(np.unique(self.y_train))}")
             
         except FileNotFoundError:
@@ -172,6 +183,92 @@ class IEEEFaultClassifier:
         # Evaluate model
         self._evaluate_model('random_forest')
         
+        return self.models['random_forest']
+
+    def train_random_forest_cv(self, param_grid=None, n_splits=5):
+        """Train Random Forest using Stratified K-Fold cross-validation.
+
+        Args:
+            param_grid (dict | None): Hyperparameters to evaluate. If ``None`` a
+                small default grid is used.
+            n_splits (int): Number of cross-validation folds.
+
+        Returns:
+            RandomForestClassifier: model trained on the full training set
+            using the best parameters from cross-validation.
+        """
+        print("\n" + "=" * 60)
+        print("RANDOM FOREST CROSS-VALIDATION")
+        print("=" * 60)
+
+        if param_grid is None:
+            param_grid = {
+                'n_estimators': [200],
+                'max_depth': [20],
+                'min_samples_split': [5],
+                'min_samples_leaf': [2],
+                'max_features': ['sqrt']
+            }
+
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+        best_params = None
+        best_score = -np.inf
+        best_mean = None
+        best_var = None
+
+        for params in ParameterGrid(param_grid):
+            fold_metrics = []
+            for train_idx, val_idx in skf.split(self.X_train, self.y_train):
+                X_tr, X_val = self.X_train.iloc[train_idx], self.X_train.iloc[val_idx]
+                y_tr, y_val = self.y_train.iloc[train_idx], self.y_train.iloc[val_idx]
+
+                model = RandomForestClassifier(
+                    **params, random_state=42, n_jobs=-1
+                )
+                model.fit(X_tr, y_tr)
+
+                y_pred = model.predict(X_val)
+                acc = accuracy_score(y_val, y_pred)
+                prec, rec, f1, _ = precision_recall_fscore_support(
+                    y_val, y_pred, average='weighted'
+                )
+                fold_metrics.append([acc, prec, rec, f1])
+
+            metrics_arr = np.array(fold_metrics)
+            metrics_mean = metrics_arr.mean(axis=0)
+            metrics_var = metrics_arr.var(axis=0, ddof=1)
+
+            print(
+                f"Params {params} -> Accuracy {metrics_mean[0]:.4f}±{np.sqrt(metrics_var[0]):.4f}"
+            )
+
+            if metrics_mean[0] > best_score:
+                best_score = metrics_mean[0]
+                best_params = params
+                best_mean = metrics_mean
+                best_var = metrics_var
+
+        metric_names = ['accuracy', 'precision', 'recall', 'f1_score']
+        self.results['random_forest_cv'] = {
+            'params': best_params,
+            'mean': dict(zip(metric_names, best_mean)),
+            'variance': dict(zip(metric_names, best_var)),
+        }
+
+        print(f"Best params: {best_params}")
+        for name, mean_val in self.results['random_forest_cv']['mean'].items():
+            var_val = self.results['random_forest_cv']['variance'][name]
+            print(f"{name.title()}: {mean_val:.4f}±{np.sqrt(var_val):.4f}")
+
+        # Train final model on full training data
+        self.models['random_forest'] = RandomForestClassifier(
+            **best_params, random_state=42, n_jobs=-1
+        )
+        self.models['random_forest'].fit(self.X_train, self.y_train)
+
+        self._evaluate_model('random_forest')
+
         return self.models['random_forest']
     
     def train_xgboost(self, tune_hyperparameters=True):
@@ -243,17 +340,112 @@ class IEEEFaultClassifier:
         
         return self.models['xgboost']
     
-    def train_cnn_lstm(self, epochs=100, batch_size=32):
+    def train_xgboost_cv(self, param_grid=None, n_splits=5):
+        """Train XGBoost using Stratified K-Fold cross-validation."""
+        print("\n" + "=" * 60)
+        print("XGBOOST CROSS-VALIDATION")
+        print("=" * 60)
+
+        if param_grid is None:
+            param_grid = {
+                'n_estimators': [200],
+                'max_depth': [10],
+                'learning_rate': [0.1],
+                'subsample': [0.9],
+                'colsample_bytree': [0.9],
+            }
+
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+        best_params = None
+        best_score = -np.inf
+        best_mean = None
+        best_var = None
+
+        for params in ParameterGrid(param_grid):
+            fold_metrics = []
+            for train_idx, val_idx in skf.split(self.X_train, self.y_train):
+                X_tr, X_val = self.X_train.iloc[train_idx], self.X_train.iloc[val_idx]
+                y_tr, y_val = self.y_train.iloc[train_idx], self.y_train.iloc[val_idx]
+
+                model = xgb.XGBClassifier(
+                    **params,
+                    random_state=42,
+                    n_jobs=-1,
+                    eval_metric='mlogloss'
+                )
+                model.fit(X_tr, y_tr)
+
+                y_pred = model.predict(X_val)
+                acc = accuracy_score(y_val, y_pred)
+                prec, rec, f1, _ = precision_recall_fscore_support(
+                    y_val, y_pred, average='weighted'
+                )
+                fold_metrics.append([acc, prec, rec, f1])
+
+            metrics_arr = np.array(fold_metrics)
+            metrics_mean = metrics_arr.mean(axis=0)
+            metrics_var = metrics_arr.var(axis=0, ddof=1)
+
+            print(
+                f"Params {params} -> Accuracy {metrics_mean[0]:.4f}±{np.sqrt(metrics_var[0]):.4f}"
+            )
+
+            if metrics_mean[0] > best_score:
+                best_score = metrics_mean[0]
+                best_params = params
+                best_mean = metrics_mean
+                best_var = metrics_var
+
+        metric_names = ['accuracy', 'precision', 'recall', 'f1_score']
+        self.results['xgboost_cv'] = {
+            'params': best_params,
+            'mean': dict(zip(metric_names, best_mean)),
+            'variance': dict(zip(metric_names, best_var)),
+        }
+
+        print(f"Best params: {best_params}")
+        for name, mean_val in self.results['xgboost_cv']['mean'].items():
+            var_val = self.results['xgboost_cv']['variance'][name]
+            print(f"{name.title()}: {mean_val:.4f}±{np.sqrt(var_val):.4f}")
+
+        # Train final model
+        self.models['xgboost'] = xgb.XGBClassifier(
+            **best_params,
+            random_state=42,
+            n_jobs=-1,
+            eval_metric='mlogloss'
+        )
+        self.models['xgboost'].fit(self.X_train, self.y_train)
+
+        self._evaluate_model('xgboost')
+        return self.models['xgboost']
+    
+    def train_cnn_lstm(
+    self,
+    epochs=50,
+    batch_size=32,
+    conv_filters=None,
+    lstm_units=None,
+    use_early_stopping=True,
+    early_stopping_patience=5,
+):
         """
         Train CNN-LSTM model for temporal pattern recognition
         
         Args:
             epochs: Maximum training epochs
             batch_size: Training batch size
+            conv_filters: List of Conv1D filter sizes. Each entry creates a
+                Conv1D layer. Defaults to [16].
+            lstm_units: List of LSTM layer sizes. Each entry creates an LSTM
+                layer. Defaults to [25].
+            use_early_stopping: Whether to enable early stopping.
+            early_stopping_patience: Patience for early stopping in epochs. 
         """
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("TRAINING CNN-LSTM MODEL")
-        print("="*60)
+        print("=" * 60)
         
         # Prepare data for CNN-LSTM (reshape for time-series)
         # Assuming features represent time-series patterns
@@ -287,29 +479,46 @@ class IEEEFaultClassifier:
         y_test_cat = to_categorical(self.y_test, n_classes)
         
         print(f"Output classes: {n_classes}")
+
+        if conv_filters is None:
+            conv_filters = [16]
+        if lstm_units is None:
+            lstm_units = [25]
+
+        layers = []
+        for i, filters in enumerate(conv_filters):
+            if i == 0:
+                layers.append(
+                    Conv1D(
+                        filters=filters,
+                        kernel_size=3,
+                        activation="relu",
+                        input_shape=(n_timesteps, n_features_per_step),
+                    )
+                )
+            else:
+                layers.append(
+                    Conv1D(filters=filters, kernel_size=3, activation="relu")
+                )
+
+        layers.extend([MaxPooling1D(pool_size=2), BatchNormalization(), Dropout(0.3)])
+
+        for i, units in enumerate(lstm_units):
+            return_sequences = i < len(lstm_units) - 1
+            layers.append(LSTM(units, return_sequences=return_sequences))
+            layers.append(Dropout(0.3))
+
+        layers.extend(
+            [
+                Dense(100, activation="relu"),
+                BatchNormalization(),
+                Dropout(0.5),
+                Dense(n_classes, activation="softmax"),
+            ]
+        )
         
         # Build CNN-LSTM architecture
-        model = Sequential([
-            # CNN layers for feature extraction
-            Conv1D(filters=64, kernel_size=3, activation='relu', 
-                   input_shape=(n_timesteps, n_features_per_step)),
-            Conv1D(filters=32, kernel_size=3, activation='relu'),
-            MaxPooling1D(pool_size=2),
-            BatchNormalization(),
-            Dropout(0.3),
-            
-            # LSTM layers for temporal patterns
-            LSTM(50, return_sequences=True),
-            Dropout(0.3),
-            LSTM(25),
-            Dropout(0.3),
-            
-            # Dense layers for classification
-            Dense(100, activation='relu'),
-            BatchNormalization(),
-            Dropout(0.5),
-            Dense(n_classes, activation='softmax')
-        ])
+        model = Sequential(layers)
         
         # Compile model
         model.compile(
@@ -320,24 +529,30 @@ class IEEEFaultClassifier:
         
         print(f"Model architecture:")
         model.summary()
-        
-        # Training callbacks
+    
         callbacks = [
-            EarlyStopping(
-                monitor='val_accuracy',
-                patience=15,
-                restore_best_weights=True,
-                verbose=1
-            ),
+
             ReduceLROnPlateau(
-                monitor='val_loss',
+                monitor="val_loss",
                 factor=0.5,
                 patience=10,
                 min_lr=1e-6,
-                verbose=1
+                verbose=1,
             )
-        ]
         
+        ]
+
+        if use_early_stopping:
+            callbacks.insert(
+                0,
+                EarlyStopping(
+                    monitor="val_loss",
+                    patience=early_stopping_patience,
+                    restore_best_weights=True,
+                    verbose=1,
+                ),
+            )
+            
         # Train model
         print("Training CNN-LSTM model...")
         history = model.fit(
@@ -348,7 +563,8 @@ class IEEEFaultClassifier:
             callbacks=callbacks,
             verbose=1
         )
-        
+       
+
         # Store model and training data
         self.models['cnn_lstm'] = model
         self.cnn_lstm_history = history
@@ -363,6 +579,99 @@ class IEEEFaultClassifier:
         self._evaluate_cnn_lstm_model()
         
         return model
+    
+    def train_cnn_lstm_cv(self, epochs=50, batch_size=32, n_splits=5):
+        """Cross-validate CNN-LSTM model with Stratified K-Fold."""
+        print("\n" + "=" * 60)
+        print("CNN-LSTM CROSS-VALIDATION")
+        print("=" * 60)
+
+        n_timesteps = 10
+        n_features_per_step = int(self.X_train.shape[1] / n_timesteps)
+
+        X = (
+            self.X_train.iloc[:, : n_timesteps * n_features_per_step]
+            .to_numpy()
+            .reshape(-1, n_timesteps, n_features_per_step)
+        )
+        y = self.y_train.to_numpy()
+
+        n_classes = len(np.unique(y))
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+        fold_metrics = []
+        for train_idx, val_idx in skf.split(X, y):
+            X_tr, X_val = X[train_idx], X[val_idx]
+            y_tr, y_val = y[train_idx], y[val_idx]
+
+            y_tr_cat = to_categorical(y_tr, n_classes)
+            y_val_cat = to_categorical(y_val, n_classes)
+
+            model = Sequential([
+                Conv1D(filters=64, kernel_size=3, activation='relu',
+                       input_shape=(n_timesteps, n_features_per_step)),
+                Conv1D(filters=32, kernel_size=3, activation='relu'),
+                MaxPooling1D(pool_size=2),
+                BatchNormalization(),
+                Dropout(0.3),
+                LSTM(50, return_sequences=True),
+                Dropout(0.3),
+                LSTM(25),
+                Dropout(0.3),
+                Dense(100, activation='relu'),
+                BatchNormalization(),
+                Dropout(0.5),
+                Dense(n_classes, activation='softmax'),
+            ])
+
+            model.compile(
+                optimizer=Adam(learning_rate=0.001),
+                loss='categorical_crossentropy',
+                metrics=['accuracy'],
+            )
+
+            callbacks = [
+                EarlyStopping(
+                    monitor='val_accuracy',
+                    patience=5,
+                    restore_best_weights=True,
+                    verbose=0,
+                )
+            ]
+
+            model.fit(
+                X_tr,
+                y_tr_cat,
+                validation_data=(X_val, y_val_cat),
+                epochs=epochs,
+                batch_size=batch_size,
+                callbacks=callbacks,
+                verbose=0,
+            )
+
+            y_pred = np.argmax(model.predict(X_val), axis=1)
+            acc = accuracy_score(y_val, y_pred)
+            prec, rec, f1, _ = precision_recall_fscore_support(
+                y_val, y_pred, average='weighted'
+            )
+            fold_metrics.append([acc, prec, rec, f1])
+
+        metrics_arr = np.array(fold_metrics)
+        metrics_mean = metrics_arr.mean(axis=0)
+        metrics_var = metrics_arr.var(axis=0, ddof=1)
+
+        metric_names = ['accuracy', 'precision', 'recall', 'f1_score']
+        self.results['cnn_lstm_cv'] = {
+            'mean': dict(zip(metric_names, metrics_mean)),
+            'variance': dict(zip(metric_names, metrics_var)),
+        }
+
+        for name, mean_val in self.results['cnn_lstm_cv']['mean'].items():
+            var_val = self.results['cnn_lstm_cv']['variance'][name]
+            print(f"{name.title()}: {mean_val:.4f}±{np.sqrt(var_val):.4f}")
+
+        # After CV, train final model on full training data
+        return self.train_cnn_lstm(epochs=epochs, batch_size=batch_size)
     
     def _evaluate_model(self, model_name):
         """Evaluate traditional ML models (RF, XGBoost)"""

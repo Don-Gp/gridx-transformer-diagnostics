@@ -304,17 +304,16 @@ class GridXDataProcessor:
             
         return filtered_files
         
-    def create_balanced_dataset(self, samples_per_class: int = 100) -> Dict[str, List[str]]:
-        """
-        Create a balanced dataset with equal samples per class.
+    def create_balanced_dataset(self, samples_per_class: Optional[int] = 100) -> Dict[str, List[str]]:
+        """Create a dataset with an optional per-class sample limit.
         
         Args:
-            samples_per_class: Number of samples per fault class
+            samples_per_class: Number of samples per fault class, or None to use all available
             
         Returns:
             Dictionary mapping class names to file paths
         """
-        class_files = {}
+        class_files: Dict[str, List[str]] = {}
         
         # Group files by fault class
         for metadata in self.file_registry:
@@ -323,20 +322,18 @@ class GridXDataProcessor:
                 class_files[class_name] = []
             class_files[class_name].append(metadata.file_path)
             
-        # Balance the dataset
-        balanced_dataset = {}
+        # Apply sampling limit if specified
+        balanced_dataset: Dict[str, List[str]] = {}
         for class_name, file_paths in class_files.items():
-            # Randomly sample files if we have more than needed
-            if len(file_paths) >= samples_per_class:
-                selected_files = np.random.choice(
-                    file_paths, 
-                    size=samples_per_class, 
-                    replace=False
-                ).tolist()
-            else:
-                # Use all available files if we have fewer than needed
+            if samples_per_class is None:
                 selected_files = file_paths
-                logger.warning(f"Class {class_name}: Only {len(file_paths)} files available, requested {samples_per_class}")
+            elif len(file_paths) >= samples_per_class:
+                selected_files = np.random.choice(file_paths, size=samples_per_class, replace=False).tolist()
+            else:
+                selected_files = file_paths
+                logger.warning(
+                    f"Class {class_name}: Only {len(file_paths)} files available, requested {samples_per_class}"
+                )
                 
             balanced_dataset[class_name] = selected_files
             

@@ -108,7 +108,12 @@ class ETTPredictiveMaintenance:
                 self._create_ttf_targets()
             
             # Store preprocessing objects
-            self.scaler = ett_data['scaler']
+            preproc = ett_data.get('preprocessing', {})
+            self.scaler = preproc.get('scaler')
+            self.imputer = preproc.get('imputer')
+
+            if self.scaler is None:
+                raise KeyError("Scaler missing in ETT dataset; rerun unified pipeline.")
             
             print(f"ETT data loaded successfully!")
             print(f"Training samples: {self.X_train.shape[0]}")

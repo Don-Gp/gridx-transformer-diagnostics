@@ -14,6 +14,7 @@ from enum import Enum
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import SelectKBest, f_classif
 
 # Import existing pipeline components
 from ..utils.data_processor import GridXDataProcessor, DatasetConfig, FaultCategory, TransformerType
@@ -44,7 +45,7 @@ class UnifiedPipelineConfig:
         self.random_state = 42
         
         # IEEE dataset parameters (fault detection)
-        self.ieee_samples_per_class = 500
+        self.ieee_samples_per_class = None
         self.ieee_top_features = 50
         
         # ETT dataset parameters (predictive maintenance)
@@ -181,7 +182,7 @@ class UnifiedGridXPipeline:
         # Scan dataset
         ieee_stats = self.ieee_processor.scan_dataset()
         
-        # Create balanced dataset
+       # Create dataset with optional balancing
         samples_per_class = 10 if quick_test else self.config.ieee_samples_per_class
         balanced_files = self.ieee_processor.create_balanced_dataset(samples_per_class)
         
@@ -320,7 +321,6 @@ class UnifiedGridXPipeline:
         # Create cross-dataset features if enabled
         if self.config.enable_cross_dataset_features:
             # Statistical correlations between fault patterns and operational patterns
-            # This is conceptual - in practice you'd need aligned timestamps
             
             cross_features = {}
             
@@ -404,19 +404,38 @@ class UnifiedGridXPipeline:
                 random_state=self.config.random_state,
                 stratify=y_temp
             )
-            
+
+            # Feature selection
+            selector = SelectKBest(score_func=f_classif, k=self.config.ieee_top_features)
+            X_train_selected = pd.DataFrame(
+                selector.fit_transform(X_train, y_train),
+                columns=X_train.columns[selector.get_support()],
+                index=X_train.index
+            )
+            X_val_selected = pd.DataFrame(
+                selector.transform(X_val),
+                columns=X_train_selected.columns,
+                index=X_val.index
+            )
+            X_test_selected = pd.DataFrame(
+                selector.transform(X_test),
+                columns=X_train_selected.columns,
+                index=X_test.index
+            )
+
             final_datasets['ieee_fault_detection'] = {
-                'X_train': X_train,
-                'X_val': X_val, 
-                'X_test': X_test,
+                'X_train': X_train_selected,
+                'X_val': X_val_selected,
+                'X_test': X_test_selected,
                 'y_train': y_train,
                 'y_val': y_val,
                 'y_test': y_test,
-                'feature_names': X_ieee_scaled.columns.tolist(),
+                'feature_names': X_train_selected.columns.tolist(),
                 'class_mapping': self.ieee_data['class_mapping'],
                 'preprocessing': {
                     'imputer': imputer,
-                    'scaler': scaler
+                    'scaler': scaler,
+                    'feature_selector': selector
                 }
             }
             
