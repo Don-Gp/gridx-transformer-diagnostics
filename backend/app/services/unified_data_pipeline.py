@@ -1,6 +1,5 @@
 # backend/app/services/unified_data_pipeline.py
 
-import os
 import pickle
 import numpy as np
 import pandas as pd
@@ -20,9 +19,12 @@ from sklearn.feature_selection import SelectKBest, f_classif
 from ..utils.data_processor import GridXDataProcessor, DatasetConfig, FaultCategory, TransformerType
 from ..utils.feature_extractor import GridXFeatureExtractor, FeatureConfig, FeatureSelector
 from ..utils.ett_data_processor import ETTDataProcessor, ETTConfig, ETTSample
-from .data_pipeline import PipelineConfig
+from .data_pipeline import PipelineConfig, _resolve_base_dir, _resolve_path_from_env
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 class DatasetType(Enum):
     """Types of datasets in the unified pipeline"""
@@ -32,14 +34,34 @@ class DatasetType(Enum):
 class UnifiedPipelineConfig:
     """Configuration for the unified multi-dataset pipeline"""
     
-    def __init__(self):
+    def __init__(self, validate_paths: bool = True):
+        base_dir = _resolve_base_dir()
+        data_root = _resolve_path_from_env("GRIDX_DATA_ROOT", base_dir / "data", base_dir)
+
         # Dataset paths
-        self.ieee_data_path = r"C:\Users\ogbonda\documents\Gridx-Datasets\Dataset for Transformer & PAR transients\Dataset for Transformer & PAR transients\data for transformer and par"
-        self.ett_data_path = r"C:\Users\ogbonda\DOCUMENTS\gridx-datasets\etdataset\ETT-small"
+        self.ieee_data_path: Path = _resolve_path_from_env(
+            "GRIDX_IEEE_DATA_PATH",
+            data_root / "raw" / "ieee_fault_detection",
+            base_dir,
+        )
+        self.ett_data_path: Path = _resolve_path_from_env(
+            "GRIDX_ETT_DATA_PATH",
+            data_root / "raw" / "ett_small",
+            base_dir,
+        )
+
         
         # Processing parameters
-        self.processed_data_path = "./data/processed"
-        self.model_data_path = "./data/interim"
+        self.processed_data_path: Path = _resolve_path_from_env(
+            "GRIDX_PROCESSED_DATA_PATH",
+            data_root / "processed",
+            base_dir,
+        )
+        self.model_data_path: Path = _resolve_path_from_env(
+            "GRIDX_MODEL_DATA_PATH",
+            data_root / "interim",
+            base_dir,
+        )
         self.test_size = 0.2
         self.validation_size = 0.2
         self.random_state = 42
@@ -58,8 +80,35 @@ class UnifiedPipelineConfig:
         self.unify_feature_space = True
         
         # Create directories
-        os.makedirs(self.processed_data_path, exist_ok=True)
-        os.makedirs(self.model_data_path, exist_ok=True)
+        self.processed_data_path.mkdir(parents=True, exist_ok=True)
+        self.model_data_path.mkdir(parents=True, exist_ok=True)
+
+        if validate_paths:
+            self._validate_required_paths(require_ieee=True, require_ett=True)
+
+    def _validate_required_paths(self, *, require_ieee: bool, require_ett: bool) -> None:
+        errors: List[str] = []
+
+        if require_ieee and not self.ieee_data_path.exists():
+            errors.append(f"IEEE dataset directory not found: {self.ieee_data_path}")
+
+        if require_ett:
+            if not self.ett_data_path.exists():
+                errors.append(f"ETT dataset directory not found: {self.ett_data_path}")
+            elif not any(self.ett_data_path.glob('*.csv')):
+                errors.append(f"No CSV files found in ETT dataset directory: {self.ett_data_path}")
+
+        if errors:
+            for message in errors:
+                logger.error(message)
+            raise FileNotFoundError(
+                "Required dataset paths are missing or incomplete. Update your environment variables or .env configuration."
+            )
+
+    def validate_for_run(self, include_ieee: bool, include_ett: bool) -> None:
+        """Validate dataset availability for the requested pipeline run."""
+
+        self._validate_required_paths(require_ieee=include_ieee, require_ett=include_ett)
 
 class UnifiedGridXPipeline:
     """
@@ -68,11 +117,11 @@ class UnifiedGridXPipeline:
     """
     
     def __init__(self, config: Optional[UnifiedPipelineConfig] = None):
-        self.config = config or UnifiedPipelineConfig()
+        self.config = config or UnifiedPipelineConfig(validate_paths=False)
         
         # Initialize IEEE components
         self.ieee_config = DatasetConfig(
-            base_path=self.config.ieee_data_path,
+            base_path=str(self.config.ieee_data_path),
             parallel_workers=4
         )
         self.ieee_processor = GridXDataProcessor(self.ieee_config)
@@ -80,7 +129,7 @@ class UnifiedGridXPipeline:
         
         # Initialize ETT components
         self.ett_config = ETTConfig(
-            base_path=self.config.ett_data_path
+            base_path=str(self.config.ett_data_path)
         )
         self.ett_processor = ETTDataProcessor(self.ett_config)
         
@@ -116,6 +165,7 @@ class UnifiedGridXPipeline:
         start_time = datetime.now()
         
         try:
+            self.config.validate_for_run(include_ieee, include_ett)
             results = {}
             
             # Step 1: Load IEEE fault detection data
@@ -320,8 +370,7 @@ class UnifiedGridXPipeline:
         
         # Create cross-dataset features if enabled
         if self.config.enable_cross_dataset_features:
-            # Statistical correlations between fault patterns and operational patterns
-            
+            # Statistical correlations between fault patterns and operational patterns  
             cross_features = {}
             
             # IEEE fault severity indicators

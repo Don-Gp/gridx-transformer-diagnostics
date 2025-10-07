@@ -5,7 +5,6 @@ Processes both IEEE fault detection and ETT operational data
 """
 
 import sys
-import os
 import argparse
 import logging
 from pathlib import Path
@@ -15,6 +14,7 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent / "backend"))
 
 from app.services.unified_data_pipeline import UnifiedGridXPipeline, UnifiedPipelineConfig
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(
@@ -28,26 +28,33 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+
 def validate_datasets():
     """Validate that both datasets exist"""
-    ieee_path = Path(r"C:\Users\ogbonda\documents\Gridx-Datasets\Dataset for Transformer & PAR transients\Dataset for Transformer & PAR transients\data for transformer and par")
-    ett_path = Path(r"C:\Users\ogbonda\DOCUMENTS\gridx-datasets\etdataset\ETT-small")
+    config = UnifiedPipelineConfig(validate_paths=False)
     
     missing_datasets = []
     
-    if not ieee_path.exists():
-        missing_datasets.append(f"IEEE Dataset: {ieee_path}")
-    
-    if not ett_path.exists():
-        missing_datasets.append(f"ETT Dataset: {ett_path}")
-    elif not any(ett_path.glob("*.csv")):
-        missing_datasets.append(f"ETT Dataset CSV files in: {ett_path}")
+    if not config.ieee_data_path.exists():
+        missing_datasets.append(f"IEEE Dataset: {config.ieee_data_path}")
+
+    if not config.ett_data_path.exists():
+        missing_datasets.append(f"ETT Dataset: {config.ett_data_path}")
+    elif not any(config.ett_data_path.glob("*.csv")):
+        missing_datasets.append(f"ETT Dataset CSV files in: {config.ett_data_path}")
     
     if missing_datasets:
         print("ERROR: Missing datasets!")
         for dataset in missing_datasets:
             print(f"  Not found: {dataset}")
         return False
+    
+    logger.info(
+        "Datasets available (IEEE: %s, ETT: %s)",
+        config.ieee_data_path,
+        config.ett_data_path,
+    )
     
     logger.info("All datasets validated successfully")
     return True
@@ -58,7 +65,15 @@ def run_ieee_only(quick_test=False):
     print("IEEE FAULT DETECTION ONLY")
     print("="*60)
     
-    pipeline = UnifiedGridXPipeline()
+    try:
+        pipeline = UnifiedGridXPipeline()
+    except FileNotFoundError as exc:
+        logger.error("Unified pipeline initialization failed: %s", exc)
+        print("\nERROR: Unified pipeline configuration invalid. Check your dataset paths in the .env file.")
+        return {
+            'status': 'failed',
+            'error': str(exc),
+        }
     results = pipeline.run_unified_pipeline(
         include_ieee=True,
         include_ett=False,
@@ -82,6 +97,15 @@ def run_ett_only(quick_test=False):
     print("="*60)
     
     pipeline = UnifiedGridXPipeline()
+    try:
+        pipeline = UnifiedGridXPipeline()
+    except FileNotFoundError as exc:
+        logger.error("Unified pipeline initialization failed: %s", exc)
+        print("\nERROR: Unified pipeline configuration invalid. Check your dataset paths in the .env file.")
+        return {
+            'status': 'failed',
+            'error': str(exc),
+        }
     results = pipeline.run_unified_pipeline(
         include_ieee=False,
         include_ett=True,
@@ -104,7 +128,15 @@ def run_unified_pipeline(quick_test=False):
     print("UNIFIED GRIDX PIPELINE")
     print("="*60)
     
-    pipeline = UnifiedGridXPipeline()
+    try:
+        pipeline = UnifiedGridXPipeline()
+    except FileNotFoundError as exc:
+        logger.error("Unified pipeline initialization failed: %s", exc)
+        print("\nERROR: Unified pipeline configuration invalid. Check your dataset paths in the .env file.")
+        return {
+            'status': 'failed',
+            'error': str(exc),
+        }
     results = pipeline.run_unified_pipeline(
         include_ieee=True,
         include_ett=True,
@@ -164,7 +196,12 @@ def show_dataset_info():
     print("="*60)
     
     # Initialize pipeline to get dataset info
-    pipeline = UnifiedGridXPipeline()
+    try:
+        pipeline = UnifiedGridXPipeline()
+    except FileNotFoundError as exc:
+        logger.error("Unified pipeline initialization failed: %s", exc)
+        print("\nERROR: Unified pipeline configuration invalid. Check your dataset paths in the .env file.")
+        return
     
     # IEEE info
     print("\n1. IEEE DataPort - Fault Detection:")

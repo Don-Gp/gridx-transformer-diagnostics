@@ -13,12 +13,40 @@ import json
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.feature_selection import SelectKBest, f_classif
 
 from ..utils.data_processor import GridXDataProcessor, DatasetConfig, FaultCategory, TransformerType
 from ..utils.feature_extractor import GridXFeatureExtractor, FeatureConfig, FeatureSelector
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_base_dir() -> Path:
+    base_dir_env = os.getenv("GRIDX_BASE_DIR")
+    if not base_dir_env:
+        return _REPO_ROOT
+
+    base_dir = Path(base_dir_env).expanduser()
+    if not base_dir.is_absolute():
+        base_dir = _REPO_ROOT / base_dir
+    return base_dir
+
+
+def _resolve_path_from_env(var_name: str, default: Path, base_dir: Optional[Path] = None) -> Path:
+    base_dir = base_dir or _resolve_base_dir()
+    env_value = os.getenv(var_name)
+
+    if not env_value:
+        return default
+
+    path = Path(env_value).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return path
 
 class PipelineConfig:
     """Configuration for the complete data pipeline"""
@@ -37,7 +65,7 @@ class PipelineConfig:
         # FIXED: Scale up samples per class based on available data
         if production_mode:
             # Use much larger sample size for production models
-            self.samples_per_class = 8000  # Increased from 500
+            self.samples_per_class = 2000  # Increased from 500
             self.max_files_per_class = None  # No limit - use all available files
         else:
             # Testing mode

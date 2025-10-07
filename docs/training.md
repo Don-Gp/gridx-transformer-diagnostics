@@ -5,6 +5,10 @@ This project trains models for two datasets:
 1. **IEEE DataPort fault detection**
 2. **ETT predictive maintenance**
 
+> ℹ️ Configure dataset paths in your `.env` file before training. See the
+> "Dataset Configuration" section of the README for the list of supported
+> environment variables.
+
 Both datasets are trained independently. After generating the unified dataset via:
 
 ```bash

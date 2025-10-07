@@ -5,11 +5,12 @@ Complete script to execute the GridX transformer diagnostic data pipeline
 """
 
 import sys
-import os
 import argparse
 import logging
 from pathlib import Path
 from datetime import datetime
+
+from dotenv import load_dotenv
 
 # Add backend to Python path
 sys.path.append(str(Path(__file__).parent.parent / "backend"))
@@ -17,6 +18,9 @@ sys.path.append(str(Path(__file__).parent.parent / "backend"))
 from app.services.data_pipeline import GridXDataPipeline, PipelineConfig
 from app.utils.data_processor import GridXDataProcessor, DatasetConfig
 from app.utils.feature_extractor import GridXFeatureExtractor, FeatureConfig
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 def setup_directories():
     """Create necessary directories"""
+    config = PipelineConfig(validate_paths=False)
     directories = [
         "./data/raw",
         "./data/processed", 
